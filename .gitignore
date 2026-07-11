@@ -1,0 +1,6 @@
+# Personal voiceprint profiles created by `python app.py <mantra> --train`
+voiceprints/
+
+.venv/
+__pycache__/
+*.egg-info/
