@@ -8,6 +8,13 @@ from japa.counting import MantraProgress, detect_repetitions, render_beads
 from japa.mantras import MANTRAS, get_mantra
 from japa.namavalis import NAMAVALIS, get_namavali
 from japa.profiles import append_to_profile, load_profile, slugify
+from japa.sounds import (
+    AudioFeedback,
+    mantra_complete_wave,
+    ready_wave,
+    session_complete_wave,
+    wrong_wave,
+)
 from voicekit import MatchingAlgo
 
 REF = "oːm nəməɦə ʃɪʋaːjə"  # Om Namah Shivaya
@@ -127,6 +134,26 @@ class TestNamavalis(unittest.TestCase):
         # menu numbering continues after the mantras
         self.assertEqual(get_namavali(str(len(MANTRAS) + 1)).key, NAMAVALIS[0].key)
         self.assertIsNone(get_namavali(str(len(MANTRAS) + len(NAMAVALIS) + 1)))
+
+
+class TestSounds(unittest.TestCase):
+    def test_waves_are_playable(self):
+        import numpy as np
+        for wave_fn in (ready_wave, wrong_wave, mantra_complete_wave,
+                        session_complete_wave):
+            wave = wave_fn()
+            self.assertGreater(wave.size, 0)
+            self.assertEqual(wave.dtype, np.float32)
+            self.assertTrue(np.all(np.isfinite(wave)))
+            self.assertLessEqual(np.abs(wave).max(), 1.0, "would clip")
+
+    def test_disabled_feedback_is_silent_noop(self):
+        # Must not touch the audio device at all when disabled.
+        sounds = AudioFeedback(enabled=False)
+        sounds.ready()
+        sounds.wrong()
+        sounds.mantra_complete()
+        sounds.session_complete()
 
 
 class TestRenderBeads(unittest.TestCase):

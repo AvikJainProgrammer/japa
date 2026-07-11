@@ -31,6 +31,7 @@ from .profiles import (
     profile_path,
     slugify,
 )
+from .sounds import AudioFeedback
 
 DEFAULT_TARGET = 108  # one full mala
 DEFAULT_NAMAVALI_TARGET = 1  # each name once, in sequence
@@ -97,11 +98,12 @@ def choose_items(count_arg: int | None) -> list[Item]:
             print("Pick at least one option.")
 
 
-def calibrate(mantra: Mantra, recorder, phonetics) -> str:
+def calibrate(mantra: Mantra, recorder, phonetics, sounds: AudioFeedback) -> str:
     """Record the chanter's own rendition once and use its IPA as reference."""
     print(f"\nCalibration — chant \"{mantra.text}\" once, slowly and clearly.")
     while True:
         print(">>> Listening...")
+        sounds.ready()
         audio = recorder.record()
         if audio.size == 0:
             print("(nothing heard — try again)")
@@ -114,7 +116,7 @@ def calibrate(mantra: Mantra, recorder, phonetics) -> str:
         return ipa
 
 
-def build_references(mantra: Mantra, args, recorder, phonetics) -> list[str]:
+def build_references(mantra: Mantra, args, recorder, phonetics, sounds: AudioFeedback) -> list[str]:
     """Collect everything a chant may be scored against, best sources first."""
     references = load_profile(args.voiceprints, mantra.key)
     if references:
@@ -123,7 +125,7 @@ def build_references(mantra: Mantra, args, recorder, phonetics) -> list[str]:
     if mantra.ipa:
         references.append(mantra.ipa)
     if args.calibrate or not references:
-        references.insert(0, calibrate(mantra, recorder, phonetics))
+        references.insert(0, calibrate(mantra, recorder, phonetics, sounds))
     return references
 
 
@@ -132,7 +134,7 @@ def position_label(index: int, total: int) -> str:
 
 
 def train_mantra(
-    mantra: Mantra, args, recorder, phonetics, matcher,
+    mantra: Mantra, args, recorder, phonetics, matcher, sounds: AudioFeedback,
     index: int = 1, total: int = 1,
 ) -> None:
     """Record renditions, let the chanter confirm them, save confirmed ones."""
@@ -152,6 +154,7 @@ def train_mantra(
     saved = 0
     while True:
         print("\n>>> Listening...")
+        sounds.ready()
         audio = recorder.record()
         if audio.size == 0:
             print("(nothing heard — try again)")
@@ -179,7 +182,7 @@ def train_mantra(
 
 def chant_mantra(
     mantra: Mantra, references: list[str], target: int, threshold: float,
-    max_reps: int, recorder, phonetics, matcher,
+    max_reps: int, recorder, phonetics, matcher, sounds: AudioFeedback,
     index: int = 1, total: int = 1,
 ) -> MantraProgress:
     print(f"\n{RULE}")
@@ -194,6 +197,7 @@ def chant_mantra(
     print("\nBegin chanting. Pause briefly between repetitions. Ctrl+C to finish early.\n")
 
     while not progress.done:
+        sounds.ready()
         audio = recorder.record()
         if audio.size == 0:
             continue
@@ -208,9 +212,11 @@ def chant_mantra(
             extra = f" (x{reps} in one breath)" if reps > 1 else ""
             print(f"  ✓ {score:5.1f}%{extra}   {render_beads(progress.count, target)}")
         else:
+            sounds.wrong()
             print(f"  ✗ {score:5.1f}%  heard: {ipa}")
             print(f"    not counted — chant clearly.   {render_beads(progress.count, target)}")
 
+    sounds.mantra_complete()
     print(f"\n🙏 {mantra.title} complete — {target} repetition(s), "
           f"average accuracy {progress.average_score:.1f}%.")
     return progress
@@ -223,29 +229,32 @@ def run_session(items: list[Item], args) -> None:
     recorder = VoiceRecorder(silence_timeout=args.silence)
     phonetics = PhoneticTranslator()
     matcher = MatchingAlgo(algorithm="levenshtein")
+    sounds = AudioFeedback(enabled=args.audio)
 
     total = len(items)
 
     if args.train:
         try:
             for i, (mantra, _) in enumerate(items, 1):
-                train_mantra(mantra, args, recorder, phonetics, matcher, i, total)
+                train_mantra(mantra, args, recorder, phonetics, matcher, sounds, i, total)
         except KeyboardInterrupt:
             print("\nTraining interrupted — confirmed renditions are already saved.")
         return
 
     started_at = time.time()
     results: list[MantraProgress] = []
+    finished = False
 
     try:
         for i, (mantra, target) in enumerate(items, 1):
-            references = build_references(mantra, args, recorder, phonetics)
+            references = build_references(mantra, args, recorder, phonetics, sounds)
             results.append(
                 chant_mantra(
                     mantra, references, target, args.threshold, args.max_reps,
-                    recorder, phonetics, matcher, i, total,
+                    recorder, phonetics, matcher, sounds, i, total,
                 )
             )
+        finished = True
     except KeyboardInterrupt:
         print("\n\nSession ended early.")
 
@@ -269,6 +278,8 @@ def run_session(items: list[Item], args) -> None:
                   f"(avg accuracy {p.average_score:.1f}%)")
         print(f"{RULE}")
         print("Saved to your japa journal. Pranam! 🙏")
+        if finished:
+            sounds.session_complete()
 
 
 def print_list() -> None:
@@ -312,6 +323,12 @@ def main() -> None:
                         help="seconds of silence that end one utterance (default 1.0)")
     parser.add_argument("--max-reps", type=int, default=8,
                         help="max repetitions detected in a single breath (default 8)")
+    parser.add_argument("--audio", action="store_true",
+                        help="audio feedback: a soothing tone when it's your turn to "
+                             "chant, a low tone when a chant isn't counted, and happy "
+                             "tones when a mantra and the session complete")
+    parser.add_argument("--audio-demo", action="store_true",
+                        help="play each audio feedback cue once and exit")
     parser.add_argument("--calibrate", action="store_true",
                         help="record your own rendition once at session start and "
                              "match against it too (one-off, not saved; use --train "
@@ -324,6 +341,19 @@ def main() -> None:
 
     if args.list:
         print_list()
+        return
+
+    if args.audio_demo:
+        sounds = AudioFeedback(enabled=True)
+        for label, cue in [
+            ("ready to chant", sounds.ready),
+            ("chant not counted", sounds.wrong),
+            ("mantra complete", sounds.mantra_complete),
+            ("session complete", sounds.session_complete),
+        ]:
+            print(f"♪ {label}")
+            cue()
+            time.sleep(0.5)
         return
 
     if args.history:

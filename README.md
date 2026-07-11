@@ -35,6 +35,12 @@ equivalent, but macOS keeps marking this venv's `.pth` files hidden —
 which Python 3.12+ then ignores — so `app.py` is the reliable entry
 point on this machine.)
 
+Add `--audio` for hands-free audio feedback (great with eyes closed): a
+soothing tone whenever the app is ready for you to chant, a gentle low tone
+when a chant wasn't counted, a short chime when a mantra's target is reached,
+and a happy arpeggio when the whole session completes. Preview all the cues
+with `python app.py --audio-demo`.
+
 While chanting, pause briefly between repetitions — that's how utterances are
 segmented. Chanting the mantra several times in one breath is fine: the
 matcher detects up to `--max-reps` repetitions per utterance and counts them
