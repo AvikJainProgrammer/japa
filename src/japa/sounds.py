@@ -51,8 +51,11 @@ def ready_wave() -> np.ndarray:
 
 
 def wrong_wave() -> np.ndarray:
-    """Two soft descending low tones — corrective, not harsh."""
-    return _chime([311.1, 233.1], [0.18, 0.28], gap=0.07)
+    """Three clearly distinct descending notes — corrective, not harsh.
+    Kept very distinct (stepwise fall, audible gaps) so truncation bugs —
+    a cue partly swallowed around mic transitions — are immediately
+    noticeable by ear."""
+    return _chime([523.25, 392.0, 261.63], [0.2, 0.2, 0.3], gap=0.12)
 
 
 def mantra_complete_wave() -> np.ndarray:
@@ -69,31 +72,56 @@ def session_complete_wave() -> np.ndarray:
 
 
 class AudioFeedback:
-    """Plays the cues above when enabled; every method no-ops when not."""
+    """Plays the cues above when enabled; every method no-ops when not.
+
+    Uses ONE persistent output stream for the whole session instead of
+    sounddevice's per-play streams: opening a fresh output stream right
+    after the mic stream closes makes macOS ramp/reconfigure the device,
+    which audibly swallows the start (and sometimes end) of short cues.
+    A stream that stays open has no such transitions.
+    """
 
     def __init__(self, enabled: bool = False):
         self.enabled = enabled
+        self._out = None
+
+    def _stream(self):
+        if self._out is None:
+            import sounddevice as sd
+            self._out = sd.OutputStream(
+                samplerate=SAMPLE_RATE, channels=1, dtype="float32"
+            )
+            self._out.start()
+            # Prime with silence so the device's power-up ramp swallows
+            # nothing audible from the first real cue.
+            self._out.write(np.zeros((int(SAMPLE_RATE * 0.25), 1), dtype=np.float32))
+        return self._out
 
     def _play(self, wave: np.ndarray) -> None:
         if not self.enabled:
             return
         try:
-            import sounddevice as sd
-            # Trailing silence matters: sd.wait() returns when the buffer is
-            # handed to the device, and closing the stream then can swallow
-            # the tail of a short tone before it physically plays. Padding
-            # means anything clipped is silence.
+            # Trailing silence: write() returns when the buffer is handed
+            # to the device, slightly before the tail physically plays, so
+            # pad with silence and add a small guard delay to guarantee the
+            # cue has fully sounded before the caller opens the mic.
             padded = np.concatenate(
-                [wave, np.zeros(int(SAMPLE_RATE * 0.35), dtype=np.float32)]
+                [wave, np.zeros(int(SAMPLE_RATE * 0.15), dtype=np.float32)]
             )
-            sd.play(padded, SAMPLE_RATE)
-            sd.wait()
-            # Guard delay: let the hardware finish physically emitting the
-            # tail before the caller opens the mic or plays the next cue —
-            # sd.wait() alone returns slightly too early.
-            time.sleep(0.15)
+            self._stream().write(padded.reshape(-1, 1))
+            time.sleep(0.1)
         except Exception:
-            pass  # audio out is best-effort; never break the chant loop
+            self._out = None  # retry with a fresh stream on the next cue
+            # audio out is best-effort; never break the chant loop
+
+    def close(self) -> None:
+        if self._out is not None:
+            try:
+                self._out.stop()
+                self._out.close()
+            except Exception:
+                pass
+            self._out = None
 
     def ready(self) -> None:
         self._play(ready_wave())
