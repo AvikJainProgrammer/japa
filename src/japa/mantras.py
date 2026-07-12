@@ -137,6 +137,14 @@ MANTRAS: list[Mantra] = [
             "ɳəmoː ʊʋədʒdʒʱaːjaːɳəm ɳəmoː loːeː səʋʋəsaːɦuːɳəm"
         ),
     ),
+    Mantra(
+        key="bhairav",
+        title="Bhairava Nāma Mantra",
+        text="Om Bhairavaya Namaha",
+        devanagari="ॐ भैरवाय नमः",
+        meaning="Salutation to Bhairava, the fierce form of Shiva",
+        ipa="oːm bʱɛːrəʋaːjə nəməɦə",
+    ),
 ]
 
 
