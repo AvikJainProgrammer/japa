@@ -41,7 +41,7 @@ def _build(key: str, title: str, meaning: str, entries: list[tuple[str, str, str
 
 DURGA_32_ENTRIES = [
     ("Durgā", "The Reliever of Difficulties", "dʊrɡaː"),
-    ("Durgatitśamanī", "The Dispeller of Evil Tendencies", "dʊrɡətɪʃəməniː"),
+    ("Durgārtiśaminī", "The Dispeller of Evil Tendencies", "dʊrɡaːrt̪ɪʃəmɪniː"),
     ("Durgāpadvinivārinī", "The Preventer of Miseries", "dʊrɡaːpədvɪnɪvaːrɪniː"),
     ("Durgamacchedinī", "The Destroyer of Difficulties", "dʊrɡəmətʃʰeːdɪniː"),
     ("Durgasādhinī", "The Performer of Difficult Disciplines", "dʊrɡəsaːdʱɪniː"),
@@ -62,7 +62,7 @@ DURGA_32_ENTRIES = [
     ("Durgamohā", "The Deluder of Obstacles", "dʊrɡəmoːɦaː"),
     ("Durgamagā", "The Piercer of Intricate Spaces", "dʊrɡəməɡaː"),
     ("Durgamārthaswarūpinī", "The Essence of Profound Meanings", "dʊrɡəmaːrtʰəsʋəruːpɪniː"),
-    ("Durgamāsurahantrī", "The Slayer of Supreme Demons", "dʊrɡəmaːsʊrəɦəntriː"),
+    ("Durgamāsurasaṁhantrī", "The Slayer of Supreme Demons", "dʊrɡəmaːsʊrəsəmɦəntriː"),
     ("Durgamāyudhadhārinī", "The Wielder of Formidable Weapons", "dʊrɡəmaːjʊdʱədʱaːrɪniː"),
     ("Durgamaṅgī", "The One with Sacred, Invincible Forms", "dʊrɡəməŋɡiː"),
     ("Durgamatā", "The Source of Infinite Perceptions", "dʊrɡəmət̪aː"),
@@ -70,7 +70,7 @@ DURGA_32_ENTRIES = [
     ("Durgameśwarī", "The Supreme Goddess of Fortresses", "dʊrɡəmeːʃʋəriː"),
     ("Durgabhīmā", "The Terrifying Form of Protection", "dʊrɡəbʱiːmaː"),
     ("Durgabhāmā", "The Fiercely Radiant Goddess", "dʊrɡəbʱaːmaː"),
-    ("Durgabhābā", "The Source of Brilliant Light", "dʊrɡəbʱaːbaː"),
+    ("Durgabhā", "The Source of Brilliant Light", "dʊrɡəbʱaː"),
     ("Durgadārinī", "The Annihilator of Ultimate Misery", "dʊrɡədaːrɪniː"),
 ]
 
