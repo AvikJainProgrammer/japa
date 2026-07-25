@@ -20,7 +20,12 @@ import sys
 import time
 from pathlib import Path
 
-from .counting import MantraProgress, detect_repetitions, render_beads
+from .counting import (
+    MantraProgress,
+    consume_sequence,
+    detect_repetitions,
+    render_beads,
+)
 from .journal import format_history, load_journal, save_session
 from .mantras import MANTRAS, Mantra, get_mantra
 from .namavalis import NAMAVALIS, get_namavali
@@ -116,10 +121,13 @@ def calibrate(mantra: Mantra, recorder, phonetics, sounds: AudioFeedback) -> str
         return ipa
 
 
-def build_references(mantra: Mantra, args, recorder, phonetics, sounds: AudioFeedback) -> list[str]:
+def build_references(
+    mantra: Mantra, args, recorder, phonetics, sounds: AudioFeedback,
+    verbose: bool = True,
+) -> list[str]:
     """Collect everything a chant may be scored against, best sources first."""
     references = load_profile(args.voiceprints, mantra.key)
-    if references:
+    if references and verbose:
         print(f"(using {len(references)} trained rendition(s) from "
               f"{profile_path(args.voiceprints, mantra.key)})")
     if mantra.ipa:
@@ -222,6 +230,104 @@ def chant_mantra(
     return progress
 
 
+def flow_chant(
+    entries: list[tuple[Mantra, int, list[str]]],
+    progresses: list[MantraProgress],
+    threshold: float, recorder, phonetics, sounds: AudioFeedback,
+) -> None:
+    """Continuous chanting across the whole sequence (--flow).
+
+    One utterance may cover several consecutive parts: the next names of a
+    namavali, several repetitions of one mantra, or a mix as one part
+    completes and the next begins. Counting stops at the first part below
+    the threshold, and the chanter resumes from that part.
+    """
+    total = len(entries)
+    print(f"\n{RULE}")
+    if total > 1:
+        print(f"FLOW MODE: {total} parts in sequence")
+        print("Say several consecutive parts in one breath — each correct one")
+        print("counts, in order. The first mispronounced part stops the count")
+        print("there, and you resume from it.")
+    else:
+        mantra = entries[0][0]
+        print(f"FLOW MODE: {mantra.title}")
+        if mantra.devanagari:
+            print(f"        {mantra.devanagari}")
+        print(f"Target: {entries[0][1]} repetition(s) — chant as many in one "
+              "breath as you like; every clean repetition counts.")
+    print("Ctrl+C to finish early.")
+    print(RULE)
+
+    idx = 0
+    while idx < total:
+        mantra = entries[idx][0]
+        if total > 1:
+            deva = f"   {mantra.devanagari}" if mantra.devanagari else ""
+            print(f"\n→ Say: {mantra.title}{deva}   ({idx + 1}/{total})")
+        sounds.ready()
+        audio = recorder.record()
+        if audio.size == 0:
+            continue
+        ipa = phonetics.convert(audio)
+        if not ipa:
+            continue
+
+        # Every remaining bead of every remaining part is one slot the
+        # utterance may fill, so a breath can finish one part and roll
+        # straight into the next.
+        slot_items: list[int] = []
+        for j in range(idx, total):
+            slot_items.extend([j] * (entries[j][1] - progresses[j].count))
+        match = consume_sequence(ipa, [entries[j][2] for j in slot_items], threshold)
+
+        completed_now: list[int] = []
+        counted: dict[int, list[float]] = {}
+        for j, score in zip(slot_items, match.scores):
+            progresses[j].register(1, score)
+            counted.setdefault(j, []).append(score)
+            if progresses[j].done and j not in completed_now:
+                completed_now.append(j)
+
+        if counted:
+            if total == 1:
+                p = progresses[0]
+                scores = counted[0]
+                extra = f" (x{len(scores)} in one breath)" if len(scores) > 1 else ""
+                print(f"  ✓ {sum(scores) / len(scores):5.1f}%{extra}   "
+                      f"{render_beads(p.count, p.target)}")
+            else:
+                bits = []
+                for j, scores in counted.items():  # insertion order = chant order
+                    times = f" x{len(scores)}" if len(scores) > 1 else ""
+                    bits.append(f"{entries[j][0].title} "
+                                f"{sum(scores) / len(scores):.0f}%{times}")
+                print("  ✓ " + " · ".join(bits))
+
+        for j in completed_now:
+            print(f"  🙏 {entries[j][0].title} complete — "
+                  f"{progresses[j].target} repetition(s), "
+                  f"average accuracy {progresses[j].average_score:.1f}%.")
+        if completed_now:
+            sounds.mantra_complete()
+
+        # A failed slot only counts as an attempt when it was a real try:
+        # either nothing matched at all, or a substantial tail was left over.
+        tail = ipa[match.consumed:].strip()
+        if match.stop_score is not None and (not counted or len(tail) >= 4):
+            failed = slot_items[len(match.scores)]
+            progresses[failed].register(0, match.stop_score)
+            sounds.wrong()
+            print(f"  ✗ {match.stop_score:5.1f}%  heard: {tail}")
+            if total > 1:
+                print(f"    not counted — say \"{entries[failed][0].title}\" again.")
+            else:
+                print(f"    not counted — chant clearly.   "
+                      f"{render_beads(progresses[0].count, progresses[0].target)}")
+        while idx < total and progresses[idx].done:
+            idx += 1
+
+
 def run_session(items: list[Item], args) -> None:
     print("\nLoading models (the first run downloads them)...")
     from voicekit import MatchingAlgo, PhoneticTranslator, VoiceRecorder
@@ -246,17 +352,40 @@ def run_session(items: list[Item], args) -> None:
     finished = False
 
     try:
-        for i, (mantra, target) in enumerate(items, 1):
-            references = build_references(mantra, args, recorder, phonetics, sounds)
-            results.append(
-                chant_mantra(
-                    mantra, references, target, args.threshold, args.max_reps,
-                    recorder, phonetics, matcher, sounds, i, total,
-                )
+        if args.flow:
+            # References for the whole sequence are needed up front (an
+            # utterance may span parts), so load them quietly in one go.
+            entries = [
+                (mantra, target,
+                 build_references(mantra, args, recorder, phonetics, sounds,
+                                  verbose=False))
+                for mantra, target in items
+            ]
+            trained = sum(
+                1 for m, _ in items if load_profile(args.voiceprints, m.key)
             )
+            if trained:
+                print(f"(voiceprints loaded for {trained} of {total} part(s))")
+            results.extend(
+                MantraProgress(title=m.title, target=t) for m, t, _ in entries
+            )
+            flow_chant(entries, results, args.threshold, recorder, phonetics, sounds)
+        else:
+            for i, (mantra, target) in enumerate(items, 1):
+                references = build_references(mantra, args, recorder, phonetics, sounds)
+                results.append(
+                    chant_mantra(
+                        mantra, references, target, args.threshold, args.max_reps,
+                        recorder, phonetics, matcher, sounds, i, total,
+                    )
+                )
         finished = True
     except KeyboardInterrupt:
         print("\n\nSession ended early.")
+
+    # In flow mode all progresses exist from the start — don't journal
+    # parts that were never reached before an early exit.
+    results = [p for p in results if p.attempts or p.count]
 
     if results:
         save_session(
@@ -316,6 +445,11 @@ def main() -> None:
     parser.add_argument("--voiceprints", type=Path, default=DEFAULT_VOICEPRINTS_DIR,
                         help="directory holding trained voiceprint files "
                              f"(default ./{DEFAULT_VOICEPRINTS_DIR}/)")
+    parser.add_argument("--flow", action="store_true",
+                        help="continuous chanting: say several consecutive parts "
+                             "in one breath — repetitions of a mantra, or the next "
+                             "names of a namavali — and each correct one counts in "
+                             "order, stopping at the first mispronounced part")
     parser.add_argument("--start", type=int, default=1, metavar="N",
                         help="start at item N of the session sequence (useful to "
                              "resume partway through a namavali)")
@@ -359,6 +493,9 @@ def main() -> None:
     if args.history:
         print(format_history(load_journal()))
         return
+
+    if args.flow and args.train:
+        sys.exit("--flow is a chanting mode — it cannot be combined with --train.")
 
     if args.selections:
         items: list[Item] = []

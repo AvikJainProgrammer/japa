@@ -72,6 +72,26 @@ train them the same way, or chant once at session start to calibrate
 (`--calibrate` does the same one-off calibration for any mantra without
 saving anything).
 
+## Flow mode — chant continuously
+
+By default one utterance is matched against one mantra (repeated up to
+`--max-reps` times). `--flow` removes the walls between parts entirely:
+
+```bash
+python app.py om-namah-shivaya --flow    # 5 chants in one breath count 5
+python app.py durga-32 --flow            # say the next several names in one go
+```
+
+One breath is sliced greedily from the start: each expected part — the next
+repetition of the mantra, or the next name of the namavali — claims the
+best-matching piece of what you said (scored against its trained renditions
+and built-in IPA, best wins). Counting stops at the first part below the
+threshold and you are prompted to resume *from that part* — if you say names
+1–3 but name 2 was off, only name 1 counts and you're asked for name 2, even
+if name 3 was perfect. Saying fewer parts than remain is never a mistake;
+flow also rolls across boundaries, so one breath can finish a name's target
+and continue into the next name.
+
 ## Namavalis — sequences of names
 
 A namavali is a garland of divine names chanted in order, once each —

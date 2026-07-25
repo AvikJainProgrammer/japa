@@ -5,6 +5,14 @@ times in a single breath, which VoiceRecorder captures as one utterance.
 detect_repetitions() therefore scores the captured IPA against k
 concatenated copies of the reference for k = 1..max_reps and keeps the
 best-scoring k, so one utterance can legitimately count for several beads.
+
+Flow mode (--flow) goes further: one utterance may span *different*
+consecutive parts — e.g. the next several names of a namavali.
+consume_sequence() slices the utterance greedily, part by part, each part
+matched by best_prefix_match() against any of its acceptable references
+(built-in IPA plus trained renditions), and stops at the first part that
+falls below the threshold — so a mistake on name 2 blocks name 3 even if
+name 3 itself was said correctly.
 """
 
 from dataclasses import dataclass, field
@@ -38,6 +46,88 @@ def detect_repetitions(
     if best_score >= threshold:
         return best_k, best_score
     return 0, best_score
+
+
+def best_prefix_match(utterance: str, reference: str) -> tuple[float, int]:
+    """Score the best-matching *prefix* of `utterance` against `reference`.
+
+    Returns (score, chars_consumed). One semi-global Levenshtein pass
+    yields the edit distance from `reference` to every prefix of
+    `utterance`; each is normalized exactly like voicekit's MatchingAlgo
+    ((1 - distance / max(len)) * 100), so scores stay comparable with
+    whole-utterance matching and share the same --threshold. Ties prefer
+    the prefix closest in length to the reference, so an exact repetition
+    ("durga durga...") consumes exactly one copy.
+    """
+    u = utterance.lower()
+    r = reference.lower().strip()
+    m, n = len(r), len(u)
+    if m == 0:
+        return 0.0, 0
+    prev = list(range(n + 1))  # distance("", u[:j]) = j
+    for i in range(1, m + 1):
+        cur = [i] + [0] * n
+        rc = r[i - 1]
+        for j in range(1, n + 1):
+            cur[j] = min(
+                prev[j] + 1,  # skip a reference char
+                cur[j - 1] + 1,  # skip an utterance char
+                prev[j - 1] + (rc != u[j - 1]),
+            )
+        prev = cur
+    best_score, best_j = -1.0, 0
+    for j, dist in enumerate(prev):
+        score = (1.0 - dist / max(m, j)) * 100.0
+        if score > best_score or (score == best_score and abs(j - m) < abs(best_j - m)):
+            best_score, best_j = score, j
+    return best_score, best_j
+
+
+@dataclass
+class FlowMatch:
+    """How one utterance divided across a sequence of chant slots."""
+
+    scores: list[float] = field(default_factory=list)  # one per matched slot
+    consumed: int = 0  # utterance chars claimed by the matched slots
+    stop_score: float | None = None  # score of the first failed slot, if any
+
+
+def consume_sequence(
+    utterance_ipa: str,
+    reference_sets: list[list[str]],
+    threshold: float,
+) -> FlowMatch:
+    """Slice one utterance across consecutive chant slots (flow mode).
+
+    Each slot is the list of acceptable reference IPA strings for one
+    expected part (a name, or one repetition of a mantra). Slots consume
+    the utterance greedily from the start; matching stops when a slot
+    scores below `threshold` (reported as stop_score) or when the
+    utterance runs out — saying fewer parts than remain is not a mistake,
+    so stop_score stays None in that case.
+    """
+    pos, n = 0, len(utterance_ipa)
+    result = FlowMatch()
+    for references in reference_sets:
+        while pos < n and utterance_ipa[pos].isspace():
+            pos += 1
+        if pos >= n:
+            break
+        remaining = utterance_ipa[pos:]
+        best_score, best_consumed = -1.0, 0
+        for reference in references:
+            if not reference:
+                continue
+            score, consumed = best_prefix_match(remaining, reference)
+            if score > best_score:
+                best_score, best_consumed = score, consumed
+        if best_score < threshold or best_consumed == 0:
+            result.stop_score = max(best_score, 0.0)
+            break
+        result.scores.append(best_score)
+        pos += best_consumed
+        result.consumed = pos
+    return result
 
 
 @dataclass

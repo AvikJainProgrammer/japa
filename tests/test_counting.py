@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from japa.counting import MantraProgress, detect_repetitions, render_beads
+from japa.counting import (
+    MantraProgress,
+    best_prefix_match,
+    consume_sequence,
+    detect_repetitions,
+    render_beads,
+)
 from japa.mantras import MANTRAS, get_mantra
 from japa.namavalis import NAMAVALIS, get_namavali
 from japa.profiles import append_to_profile, load_profile, slugify
@@ -63,6 +69,83 @@ class TestDetectRepetitions(unittest.TestCase):
         )
         self.assertEqual(reps, 1)
         self.assertGreater(score, 80)
+
+
+DURGA = "dʊrɡaː"
+SHAMANI = "dʊrɡaːt̪ɪrʃəməniː"
+NIVARINI = "dʊrɡaːpəd̪ʋɪnɪʋaːrɪniː"
+
+
+class TestBestPrefixMatch(unittest.TestCase):
+    def test_exact_match_consumes_reference_length(self):
+        self.assertEqual(best_prefix_match(DURGA, DURGA), (100.0, len(DURGA)))
+
+    def test_prefix_of_longer_utterance(self):
+        score, consumed = best_prefix_match(f"{DURGA} {SHAMANI}", DURGA)
+        self.assertEqual(score, 100.0)
+        self.assertEqual(consumed, len(DURGA))
+
+    def test_scores_like_matching_algo(self):
+        # One substitution against a 6-char reference: (1 - 1/6) * 100.
+        score, _ = best_prefix_match("dʊrɡaː", "dʊrɡoː")
+        self.assertAlmostEqual(score, MatchingAlgo().score("dʊrɡaː", "dʊrɡoː"))
+
+    def test_repetition_consumes_exactly_one_copy(self):
+        score, consumed = best_prefix_match(DURGA * 3, DURGA)
+        self.assertEqual(score, 100.0)
+        self.assertEqual(consumed, len(DURGA))
+
+    def test_empty_reference(self):
+        self.assertEqual(best_prefix_match(DURGA, ""), (0.0, 0))
+
+
+class TestConsumeSequence(unittest.TestCase):
+    def test_three_names_in_one_breath(self):
+        heard = f"{DURGA} {SHAMANI} {NIVARINI}"
+        match = consume_sequence(heard, [[DURGA], [SHAMANI], [NIVARINI]], threshold=50)
+        self.assertEqual(len(match.scores), 3)
+        self.assertIsNone(match.stop_score)
+        self.assertEqual(match.consumed, len(heard))
+
+    def test_stops_at_wrong_second_name_even_if_third_is_right(self):
+        heard = f"{DURGA} blahblahblah {NIVARINI}"
+        match = consume_sequence(heard, [[DURGA], [SHAMANI], [NIVARINI]], threshold=50)
+        self.assertEqual(len(match.scores), 1)
+        self.assertIsNotNone(match.stop_score)
+        self.assertLess(match.stop_score, 50)
+
+    def test_fewer_parts_spoken_is_not_a_mistake(self):
+        heard = f"{DURGA} {SHAMANI}"
+        match = consume_sequence(heard, [[DURGA], [SHAMANI], [NIVARINI]], threshold=50)
+        self.assertEqual(len(match.scores), 2)
+        self.assertIsNone(match.stop_score)
+
+    def test_repeated_mantra_counts_each_repetition(self):
+        heard = " ".join([REF] * 5)
+        match = consume_sequence(heard, [[REF]] * 5, threshold=50)
+        self.assertEqual(len(match.scores), 5)
+        self.assertTrue(all(s == 100.0 for s in match.scores))
+
+    def test_trained_rendition_matches_where_textbook_fails(self):
+        # A real trained rendition scores under threshold against the
+        # textbook IPA alone but must still count via the voiceprint.
+        trained = "oːmnamahʃivaːʌ"
+        heard = f"{trained} {trained}"
+        match = consume_sequence(heard, [[REF]] * 2, threshold=50)
+        self.assertEqual(len(match.scores), 0)
+        match = consume_sequence(heard, [[REF, "oːmnamahʃivaːjʌ"]] * 2, threshold=50)
+        self.assertEqual(len(match.scores), 2)
+
+    def test_nothing_matched(self):
+        match = consume_sequence("ɡuːt̪ən t̪aːk", [[DURGA], [SHAMANI]], threshold=50)
+        self.assertEqual(match.scores, [])
+        self.assertEqual(match.consumed, 0)
+        self.assertIsNotNone(match.stop_score)
+
+    def test_empty_utterance(self):
+        match = consume_sequence("", [[DURGA]], threshold=50)
+        self.assertEqual(match.scores, [])
+        self.assertIsNone(match.stop_score)
 
 
 class TestMantraProgress(unittest.TestCase):
