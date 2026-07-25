@@ -156,6 +156,56 @@ class TestSounds(unittest.TestCase):
         sounds.session_complete()
 
 
+class TestJournalFormatting(unittest.TestCase):
+    JOURNAL = [
+        {
+            "date": "2026-07-20 08:00",
+            "duration_minutes": 10.0,
+            "mantras": [
+                {"title": "Om", "count": 100, "target": 108, "average_score": 90.0},
+            ],
+        },
+        {
+            "date": "2026-07-21 08:00",
+            "duration_minutes": 5.0,
+            "mantras": [
+                {"title": "Om", "count": 50, "target": 50, "average_score": 60.0},
+                {"title": "Gayatri", "count": 0, "target": 11, "average_score": 0.0},
+            ],
+        },
+    ]
+
+    def test_empty_journal(self):
+        from japa.journal import format_journal
+        self.assertEqual(format_journal([]), "No sessions recorded yet.")
+
+    def test_overall_stats(self):
+        from japa.journal import format_journal
+        out = format_journal(self.JOURNAL)
+        self.assertIn("Sessions:       2   (2026-07-20 → 2026-07-21)", out)
+        self.assertIn("Time chanting:  15 min", out)
+        self.assertIn("Chants counted: 150", out)
+
+    def test_per_mantra_weighted_accuracy(self):
+        from japa.journal import format_journal
+        out = format_journal(self.JOURNAL)
+        # (90*100 + 60*50) / 150 = 80.0, across 2 sessions
+        self.assertIn("150 chant(s) in   2 session(s)   avg  80.0%", out)
+        self.assertIn("never counted", out)  # Gayatri: attempted, 0 counted
+
+    def test_namavali_session_is_condensed(self):
+        from japa.journal import format_journal
+        names = [
+            {"title": f"Name {i}", "count": 1, "target": 1, "average_score": 88.0}
+            for i in range(32)
+        ]
+        out = format_journal(
+            [{"date": "2026-07-22 07:00", "duration_minutes": 12.0, "mantras": names}]
+        )
+        self.assertIn("32 parts, 32/32 chanted", out)
+        self.assertNotIn("Name 5 1/1", out)
+
+
 class TestRenderBeads(unittest.TestCase):
     def test_bounds(self):
         self.assertTrue(render_beads(0, 108).startswith("○"))

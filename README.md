@@ -26,7 +26,8 @@ python app.py 2 5 -n 11              # a set: mantras #2 and #5, 11 times each
 python app.py --list                 # the built-in mantra library
 python app.py --calibrate 6          # match against your own voice instead of the
                                      # built-in IPA reference (good for accents)
-python app.py --history              # your japa journal (~/.japa/journal.json)
+python app.py --history              # last 10 sessions (~/.japa/journal.json)
+python app.py --journal              # entire journal + overall stats
 ```
 
 (Use the venv's python: `source .venv/bin/activate` first, or call

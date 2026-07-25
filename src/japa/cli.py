@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from .counting import MantraProgress, detect_repetitions, render_beads
-from .journal import format_history, load_journal, save_session
+from .journal import format_history, format_journal, load_journal, save_session
 from .mantras import MANTRAS, Mantra, get_mantra
 from .namavalis import NAMAVALIS, get_namavali
 from .profiles import (
@@ -337,6 +337,9 @@ def main() -> None:
                         help="list built-in mantras and namavalis")
     parser.add_argument("--history", action="store_true",
                         help="show your recent japa sessions")
+    parser.add_argument("--journal", action="store_true",
+                        help="show the entire japa journal with overall stats: "
+                             "totals, per-mantra accuracy, and every session")
     args = parser.parse_args()
 
     if args.list:
@@ -358,6 +361,10 @@ def main() -> None:
 
     if args.history:
         print(format_history(load_journal()))
+        return
+
+    if args.journal:
+        print(format_journal(load_journal()))
         return
 
     if args.selections:
