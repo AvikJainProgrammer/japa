@@ -36,6 +36,7 @@ from .sounds import AudioFeedback
 DEFAULT_TARGET = 108  # one full mala
 DEFAULT_NAMAVALI_TARGET = 1  # each name once, in sequence
 DEFAULT_THRESHOLD = 50.0  # same bar the voicekit Durga trainer settled on
+DEFAULT_TIMEOUT = 30.0  # matches VoiceRecorder's own default max_duration
 
 RULE = "─" * 70
 
@@ -182,7 +183,7 @@ def train_mantra(
 
 def chant_mantra(
     mantra: Mantra, references: list[str], target: int, threshold: float,
-    max_reps: int, recorder, phonetics, matcher, sounds: AudioFeedback,
+    max_reps: int, timeout: float, recorder, phonetics, matcher, sounds: AudioFeedback,
     index: int = 1, total: int = 1,
 ) -> MantraProgress:
     print(f"\n{RULE}")
@@ -200,9 +201,11 @@ def chant_mantra(
         sounds.ready()
         audio = recorder.record()
         if audio.size == 0:
+            print(f"  ⏱ nothing recognized in {timeout:.0f}s — listening again...")
             continue
         ipa = phonetics.convert(audio)
         if not ipa:
+            print("  (could not extract phonetics — listening again...)")
             continue
 
         reps, score = detect_repetitions(ipa, references, matcher, threshold, max_reps)
@@ -226,7 +229,7 @@ def run_session(items: list[Item], args) -> None:
     print("\nLoading models (the first run downloads them)...")
     from voicekit import MatchingAlgo, PhoneticTranslator, VoiceRecorder
 
-    recorder = VoiceRecorder(silence_timeout=args.silence)
+    recorder = VoiceRecorder(silence_timeout=args.silence, max_duration=args.timeout)
     phonetics = PhoneticTranslator()
     matcher = MatchingAlgo(algorithm="levenshtein")
     sounds = AudioFeedback(enabled=args.audio)
@@ -251,7 +254,7 @@ def run_session(items: list[Item], args) -> None:
             results.append(
                 chant_mantra(
                     mantra, references, target, args.threshold, args.max_reps,
-                    recorder, phonetics, matcher, sounds, i, total,
+                    args.timeout, recorder, phonetics, matcher, sounds, i, total,
                 )
             )
         finished = True
@@ -323,6 +326,10 @@ def main() -> None:
                         help="seconds of silence that end one utterance (default 1.0)")
     parser.add_argument("--max-reps", type=int, default=8,
                         help="max repetitions detected in a single breath (default 8)")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
+                        help="seconds to wait for a recognized mantra before giving "
+                             f"up on that attempt and listening again (default "
+                             f"{DEFAULT_TIMEOUT:.0f})")
     parser.add_argument("--audio", action="store_true",
                         help="audio feedback: a soothing tone when it's your turn to "
                              "chant, a low tone when a chant isn't counted, and happy "
